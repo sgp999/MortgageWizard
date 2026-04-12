@@ -1,7 +1,7 @@
 from fastapi import FastAPI, Form, HTTPException
 from fastapi.responses import HTMLResponse
 
-app = FastAPI(title="MORTGAGE-WIZARD")
+app = FastAPI(title="MORTGAGE-WIZARD UPDATED")
 
 
 STATE_RATES = {
