@@ -119,11 +119,13 @@ def home(
     zip_code: str = "",
     home_price: float = 0,
     down_payment: float = 0,
+    monthly_budget: float = 0,
     mortgage_rate: float = 0,
     loan_term: int = 30,
 ):
     home_price_value = "" if home_price == 0 else str(home_price)
     down_payment_value = "" if down_payment == 0 else str(down_payment)
+    monthly_budget_value = "" if monthly_budget == 0 else str(monthly_budget)
     mortgage_rate_value = "" if mortgage_rate == 0 else str(mortgage_rate)
 
     return f"""
@@ -239,7 +241,7 @@ def home(
             <div class="page-grid">
                 <div class="card form-card">
                     <h1>MORTGAGE-WIZARD</h1>
-                    <p class="small">Enter your ZIP code and compare estimated 15-year and 30-year mortgage costs.</p>
+                    <p class="small">Enter your ZIP code and compare estimated mortgage costs, affordability, and area schools.</p>
 
                     <form action="/calculate" method="post">
                         <div class="row">
@@ -259,20 +261,23 @@ def home(
                         <div class="row">
                             <div class="col">
                                 <label>Home Price</label>
-                                <input name="home_price" type="number" value="{home_price_value}" required>
+                                <input name="home_price" type="number" step="0.01" value="{home_price_value}" required>
                             </div>
                             <div class="col">
                                 <label>Down Payment</label>
-                                <input name="down_payment" type="number" value="{down_payment_value}" required>
+                                <input name="down_payment" type="number" step="0.01" value="{down_payment_value}" required>
                             </div>
                         </div>
 
                         <div class="row">
                             <div class="col">
+                                <label>Monthly Budget ($)</label>
+                                <input name="monthly_budget" type="number" step="0.01" value="{monthly_budget_value}">
+                            </div>
+                            <div class="col">
                                 <label>Mortgage Rate (%)</label>
                                 <input id="mortgage_rate" name="mortgage_rate" type="number" step="0.01" value="{mortgage_rate_value}" required>
                             </div>
-                            <div class="col"></div>
                         </div>
 
                         <button type="submit">Calculate</button>
@@ -358,7 +363,8 @@ async def calculate(
     home_price: float = Form(...),
     down_payment: float = Form(...),
     mortgage_rate: float = Form(...),
-    loan_term: int = Form(...),
+    loan_term: int = Form(30),
+    monthly_budget: float = Form(0),
 ):
     if home_price <= 0:
         raise HTTPException(status_code=400, detail="Home price must be greater than 0")
@@ -390,7 +396,7 @@ async def calculate(
     monthly_15 = calculate_monthly_payment(loan_amount, rate_15, 15)
 
     pmi = 0
-    if (down_payment / home_price) < 0.20:
+    if home_price > 0 and (down_payment / home_price) < 0.20:
         pmi = loan_amount * 0.005 / 12
 
     total_30 = monthly_30 + monthly_tax + monthly_insurance + pmi
@@ -400,12 +406,56 @@ async def calculate(
     interest_15 = (monthly_15 * 180) - loan_amount
     interest_saved = interest_30 - interest_15
 
+    affordable_price = None
+    if monthly_budget and monthly_budget > 0:
+        base_budget = monthly_budget - (monthly_tax + monthly_insurance + pmi)
+        if base_budget > 0:
+            r = (rate_30 / 100) / 12
+            n = 30 * 12
+            if r > 0:
+                affordable_loan = base_budget * (((1 + r) ** n - 1) / (r * (1 + r) ** n))
+                affordable_price = affordable_loan + down_payment
+
+    difference = None
+    budget_color = "black"
+    budget_label = ""
+
+    if monthly_budget and monthly_budget > 0:
+        difference = monthly_budget - total_30
+        if difference >= 0:
+            budget_color = "green"
+            budget_label = "Under Budget"
+        else:
+            budget_color = "red"
+            budget_label = "Over Budget"
+
     schools_html = "".join(
         [
             f"<p><b>{school['name']}</b> - Rating: {school['rating']}/10</p>"
             for school in schools
         ]
     )
+
+    affordability_html = (
+        f"<p><b>Estimated Affordable Home Price:</b> ${affordable_price:,.0f}</p>"
+        if affordable_price
+        else "<p><b>Estimated Affordable Home Price:</b> Enter a monthly budget to calculate.</p>"
+    )
+
+    budget_html = ""
+    if monthly_budget and monthly_budget > 0 and difference is not None:
+        budget_html = f"""
+        <div class="summary-card">
+            <h2>Budget vs Payment</h2>
+            <p><b>Your Monthly Budget:</b> ${monthly_budget:,.2f}</p>
+            <p><b>Base Budget After Tax, Insurance, and PMI:</b> ${base_budget:,.2f}</p>
+            <p><b>Estimated Monthly Mortgage Payment:</b> ${monthly_30:,.2f}</p>
+            <p><b>Estimated Total Monthly Payment:</b> ${total_30:,.2f}</p>
+            <p style="color:{budget_color}; font-weight:700;">
+                {budget_label}: ${abs(difference):,.2f}
+            </p>
+        </div>
+        """
 
     return f"""
     <html>
@@ -420,7 +470,7 @@ async def calculate(
                     background: #f4f7fb;
                     color: #1f2937;
                 }}
-                .header-card, .summary-card, .schools-card {{
+                .header-card, .summary-card, .schools-card, .afford-card {{
                     background: white;
                     border-radius: 14px;
                     box-shadow: 0 2px 10px rgba(0,0,0,0.08);
@@ -439,11 +489,7 @@ async def calculate(
                     box-shadow: 0 2px 10px rgba(0,0,0,0.08);
                     padding: 24px;
                 }}
-                .loan-card h2 {{
-                    margin-top: 0;
-                    color: #1d4ed8;
-                }}
-                .schools-card h2 {{
+                .loan-card h2, .schools-card h2, .afford-card h2 {{
                     margin-top: 0;
                     color: #1d4ed8;
                 }}
@@ -505,6 +551,14 @@ async def calculate(
                 </div>
             </div>
 
+            {budget_html}
+
+            <div class="afford-card">
+                <h2>Affordability Summary</h2>
+                {affordability_html}
+                <p class="muted">This estimate uses the 30-year rate and includes estimated tax, insurance, and PMI.</p>
+            </div>
+
             <div class="schools-card">
                 <h2>Area Schools</h2>
                 {schools_html}
@@ -513,7 +567,7 @@ async def calculate(
             <div class="summary-card">
                 <p><b>Interest saved with 15-year loan:</b> ${interest_saved:,.0f}</p>
                 <p class="muted">Property tax and insurance are estimates. School list is ZIP-based sample data.</p>
-                <a class="button" href="/?zip_code={zip_code}&home_price={home_price}&down_payment={down_payment}&mortgage_rate={mortgage_rate}&loan_term={loan_term}">
+                <a class="button" href="/?zip_code={zip_code}&home_price={home_price}&down_payment={down_payment}&monthly_budget={monthly_budget}&mortgage_rate={mortgage_rate}&loan_term={loan_term}">
                     New Calc
                 </a>
             </div>

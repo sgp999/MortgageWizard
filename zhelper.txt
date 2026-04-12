@@ -34,3 +34,5 @@ alias hi-"history"
 
  ==clear cache ==
  find . -name "__pycache__" -type d -exec rm -r {} +
+
+ kill -9 $(lsof -ti:8000)
