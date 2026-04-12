@@ -34,6 +34,40 @@ STATE_INSURANCE_RATES = {
     "HI": 0.0035,
 }
 
+ZIP_SCHOOLS = {
+    "44313": [
+        {"name": "Revere High School", "rating": 8},
+        {"name": "Bath Elementary School", "rating": 9},
+        {"name": "Revere Middle School", "rating": 8},
+    ],
+    "44333": [
+        {"name": "Revere High School", "rating": 8},
+        {"name": "Bath Elementary School", "rating": 9},
+        {"name": "Revere Middle School", "rating": 8},
+    ],
+    "15237": [
+        {"name": "North Allegheny High School", "rating": 9},
+        {"name": "McKnight Elementary School", "rating": 8},
+        {"name": "Carson Middle School", "rating": 8},
+    ],
+    "32804": [
+        {"name": "Edgewater High School", "rating": 7},
+        {"name": "College Park Middle School", "rating": 8},
+        {"name": "Princeton Elementary School", "rating": 8},
+    ],
+    "90210": [
+        {"name": "Beverly Hills High School", "rating": 9},
+        {"name": "Hawthorne Elementary School", "rating": 8},
+        {"name": "Beverly Vista Middle School", "rating": 8},
+    ],
+}
+
+DEFAULT_SCHOOLS = [
+    {"name": "Sample Area High School", "rating": 7},
+    {"name": "Sample Area Middle School", "rating": 7},
+    {"name": "Sample Area Elementary School", "rating": 7},
+]
+
 
 def zip_to_state(zip_code: str) -> str:
     zip_code = zip_code.strip()
@@ -76,6 +110,10 @@ def calculate_monthly_payment(loan_amount: float, annual_rate: float, years: int
     )
 
 
+def get_schools(zip_code: str):
+    return ZIP_SCHOOLS.get(zip_code, DEFAULT_SCHOOLS)
+
+
 @app.get("/", response_class=HTMLResponse)
 def home(
     zip_code: str = "",
@@ -95,38 +133,57 @@ def home(
             <style>
                 body {{
                     font-family: Arial, sans-serif;
-                    max-width: 900px;
+                    max-width: 1200px;
                     margin: 40px auto;
                     padding: 20px;
                     background: #f4f7fb;
                     color: #1f2937;
                 }}
+                .page-grid {{
+                    display: flex;
+                    gap: 24px;
+                    align-items: flex-start;
+                }}
                 .card {{
                     background: white;
                     border-radius: 14px;
                     box-shadow: 0 2px 10px rgba(0,0,0,0.08);
-                    padding: 28px;
+                    padding: 32px;
+                }}
+                .form-card {{
+                    flex: 1.5;
+                }}
+                .schools-card {{
+                    flex: 1;
+                    min-height: 300px;
                 }}
                 h1 {{
+                    margin-top: 0;
+                    color: #1d4ed8;
+                    margin-bottom: 10px;
+                }}
+                h2 {{
                     margin-top: 0;
                     color: #1d4ed8;
                 }}
                 label {{
                     font-weight: 600;
                     display: block;
-                    margin-bottom: 6px;
+                    margin-bottom: 8px;
                 }}
                 input, select {{
                     width: 100%;
-                    padding: 10px 12px;
+                    padding: 12px 14px;
                     border: 1px solid #d1d5db;
-                    border-radius: 8px;
+                    border-radius: 10px;
                     box-sizing: border-box;
-                    margin-bottom: 18px;
+                    margin-bottom: 22px;
+                    font-size: 15px;
                 }}
                 .row {{
                     display: flex;
-                    gap: 20px;
+                    gap: 24px;
+                    margin-bottom: 6px;
                 }}
                 .col {{
                     flex: 1;
@@ -135,10 +192,11 @@ def home(
                     background: #2563eb;
                     color: white;
                     border: none;
-                    padding: 12px 18px;
-                    border-radius: 8px;
+                    padding: 14px 22px;
+                    border-radius: 10px;
                     font-size: 16px;
                     cursor: pointer;
+                    margin-top: 8px;
                 }}
                 button:hover {{
                     background: #1d4ed8;
@@ -146,56 +204,134 @@ def home(
                 .small {{
                     color: #6b7280;
                     font-size: 14px;
+                    margin-bottom: 26px;
+                }}
+                .school-item {{
+                    padding: 12px 0;
+                    border-bottom: 1px solid #e5e7eb;
+                }}
+                .school-item:last-child {{
+                    border-bottom: none;
+                }}
+                .school-name {{
+                    font-weight: 700;
+                    margin-bottom: 4px;
+                }}
+                .school-rating {{
+                    color: #374151;
+                }}
+                .placeholder {{
+                    color: #6b7280;
+                    line-height: 1.5;
+                }}
+                @media (max-width: 900px) {{
+                    .page-grid {{
+                        flex-direction: column;
+                    }}
+                    .row {{
+                        flex-direction: column;
+                        gap: 0;
+                    }}
                 }}
             </style>
         </head>
         <body>
-            <div class="card">
-                <h1>MORTGAGE-WIZARD</h1>
-                <p class="small">Enter your ZIP code and compare estimated 15-year and 30-year mortgage costs.</p>
+            <div class="page-grid">
+                <div class="card form-card">
+                    <h1>MORTGAGE-WIZARD</h1>
+                    <p class="small">Enter your ZIP code and compare estimated 15-year and 30-year mortgage costs.</p>
 
-                <form action="/calculate" method="post">
-                    <label>ZIP Code</label>
-                    <input id="zip_code" name="zip_code" value="{zip_code}" required onblur="fetchRate()">
+                    <form action="/calculate" method="post">
+                        <div class="row">
+                            <div class="col">
+                                <label>ZIP Code</label>
+                                <input id="zip_code" name="zip_code" value="{zip_code}" required oninput="fetchRateAndSchools()">
+                            </div>
+                            <div class="col">
+                                <label>Loan Term</label>
+                                <select id="loan_term" name="loan_term" onchange="fetchRateAndSchools()">
+                                    <option value="30" {"selected" if loan_term == 30 else ""}>30 Year</option>
+                                    <option value="15" {"selected" if loan_term == 15 else ""}>15 Year</option>
+                                </select>
+                            </div>
+                        </div>
 
-                    <div class="row">
-                        <div class="col">
-                            <label>Home Price</label>
-                            <input name="home_price" type="number" value="{home_price_value}" required>
+                        <div class="row">
+                            <div class="col">
+                                <label>Home Price</label>
+                                <input name="home_price" type="number" value="{home_price_value}" required>
+                            </div>
+                            <div class="col">
+                                <label>Down Payment</label>
+                                <input name="down_payment" type="number" value="{down_payment_value}" required>
+                            </div>
                         </div>
-                        <div class="col">
-                            <label>Down Payment</label>
-                            <input name="down_payment" type="number" value="{down_payment_value}" required>
+
+                        <div class="row">
+                            <div class="col">
+                                <label>Mortgage Rate (%)</label>
+                                <input id="mortgage_rate" name="mortgage_rate" type="number" step="0.01" value="{mortgage_rate_value}" required>
+                            </div>
+                            <div class="col"></div>
                         </div>
+
+                        <button type="submit">Calculate</button>
+                    </form>
+                </div>
+
+                <div class="card schools-card">
+                    <h2>Area Schools</h2>
+                    <div id="schools_list" class="placeholder">
+                        Enter a 5-digit ZIP code to see area schools.
                     </div>
-
-                    <label>Mortgage Rate (%)</label>
-                    <input id="mortgage_rate" name="mortgage_rate" type="number" step="0.01" value="{mortgage_rate_value}" required>
-
-                    <label>Loan Term</label>
-                    <select id="loan_term" name="loan_term" onchange="fetchRate()">
-                        <option value="30" {"selected" if loan_term == 30 else ""}>30 Year</option>
-                        <option value="15" {"selected" if loan_term == 15 else ""}>15 Year</option>
-                    </select>
-
-                    <button type="submit">Calculate</button>
-                </form>
+                </div>
             </div>
 
             <script>
-            async function fetchRate() {{
+            async function fetchRateAndSchools() {{
                 const zip = document.getElementById("zip_code").value;
                 const term = document.getElementById("loan_term").value;
+                const schoolsList = document.getElementById("schools_list");
 
-                if (zip.length !== 5) return;
+                if (zip.length !== 5) {{
+                    schoolsList.innerHTML = "Enter a 5-digit ZIP code to see area schools.";
+                    return;
+                }}
 
-                const res = await fetch(`/rate?zip_code=${{zip}}&loan_term=${{term}}`);
-                const data = await res.json();
+                try {{
+                    const rateRes = await fetch(`/rate?zip_code=${{zip}}&loan_term=${{term}}`);
+                    const rateData = await rateRes.json();
 
-                if (data.rate) {{
-                    document.getElementById("mortgage_rate").value = data.rate;
+                    if (rateData.rate) {{
+                        document.getElementById("mortgage_rate").value = rateData.rate;
+                    }}
+
+                    const schoolsRes = await fetch(`/schools?zip_code=${{zip}}`);
+                    const schoolsData = await schoolsRes.json();
+
+                    if (schoolsData.schools && schoolsData.schools.length > 0) {{
+                        schoolsList.innerHTML = schoolsData.schools.map(
+                            school => `
+                                <div class="school-item">
+                                    <div class="school-name">${{school.name}}</div>
+                                    <div class="school-rating">Rating: ${{school.rating}}/10</div>
+                                </div>
+                            `
+                        ).join("");
+                    }} else {{
+                        schoolsList.innerHTML = "No schools found for that ZIP code.";
+                    }}
+                }} catch (error) {{
+                    schoolsList.innerHTML = "Could not load schools right now.";
                 }}
             }}
+
+            window.onload = function() {{
+                const zip = document.getElementById("zip_code").value;
+                if (zip.length === 5) {{
+                    fetchRateAndSchools();
+                }}
+            }};
             </script>
         </body>
     </html>
@@ -209,6 +345,13 @@ def get_rate(zip_code: str, loan_term: int = 30):
     return {"state": state, "rate": rate}
 
 
+@app.get("/schools")
+def schools(zip_code: str):
+    if len(zip_code.strip()) != 5 or not zip_code.strip().isdigit():
+        return {"schools": []}
+    return {"schools": get_schools(zip_code.strip())}
+
+
 @app.post("/calculate", response_class=HTMLResponse)
 async def calculate(
     zip_code: str = Form(...),
@@ -217,10 +360,20 @@ async def calculate(
     mortgage_rate: float = Form(...),
     loan_term: int = Form(...),
 ):
-    state = zip_to_state(zip_code)
+    if home_price <= 0:
+        raise HTTPException(status_code=400, detail="Home price must be greater than 0")
 
-    rate_30 = STATE_RATES.get(state, {}).get("30", "N/A")
-    rate_15 = STATE_RATES.get(state, {}).get("15", "N/A")
+    if down_payment < 0:
+        raise HTTPException(status_code=400, detail="Down payment cannot be negative")
+
+    if down_payment >= home_price:
+        raise HTTPException(status_code=400, detail="Down payment must be less than home price")
+
+    state = zip_to_state(zip_code)
+    schools = get_schools(zip_code)
+
+    rate_30 = float(STATE_RATES.get(state, {}).get("30", mortgage_rate))
+    rate_15 = float(STATE_RATES.get(state, {}).get("15", mortgage_rate))
 
     tax_rate = STATE_TAX_RATES.get(state, 0.015)
     insurance_rate = STATE_INSURANCE_RATES.get(state, 0.004)
@@ -233,8 +386,8 @@ async def calculate(
 
     loan_amount = home_price - down_payment
 
-    monthly_30 = calculate_monthly_payment(loan_amount, mortgage_rate, 30)
-    monthly_15 = calculate_monthly_payment(loan_amount, mortgage_rate, 15)
+    monthly_30 = calculate_monthly_payment(loan_amount, rate_30, 30)
+    monthly_15 = calculate_monthly_payment(loan_amount, rate_15, 15)
 
     pmi = 0
     if (down_payment / home_price) < 0.20:
@@ -246,6 +399,13 @@ async def calculate(
     interest_30 = (monthly_30 * 360) - loan_amount
     interest_15 = (monthly_15 * 180) - loan_amount
     interest_saved = interest_30 - interest_15
+
+    schools_html = "".join(
+        [
+            f"<p><b>{school['name']}</b> - Rating: {school['rating']}/10</p>"
+            for school in schools
+        ]
+    )
 
     return f"""
     <html>
@@ -260,7 +420,7 @@ async def calculate(
                     background: #f4f7fb;
                     color: #1f2937;
                 }}
-                .header-card, .summary-card {{
+                .header-card, .summary-card, .schools-card {{
                     background: white;
                     border-radius: 14px;
                     box-shadow: 0 2px 10px rgba(0,0,0,0.08);
@@ -283,6 +443,10 @@ async def calculate(
                     margin-top: 0;
                     color: #1d4ed8;
                 }}
+                .schools-card h2 {{
+                    margin-top: 0;
+                    color: #1d4ed8;
+                }}
                 .big-number {{
                     font-size: 32px;
                     font-weight: 700;
@@ -302,6 +466,11 @@ async def calculate(
                 }}
                 .muted {{
                     color: #6b7280;
+                }}
+                @media (max-width: 700px) {{
+                    .loan-grid {{
+                        flex-direction: column;
+                    }}
                 }}
             </style>
         </head>
@@ -336,9 +505,14 @@ async def calculate(
                 </div>
             </div>
 
+            <div class="schools-card">
+                <h2>Area Schools</h2>
+                {schools_html}
+            </div>
+
             <div class="summary-card">
                 <p><b>Interest saved with 15-year loan:</b> ${interest_saved:,.0f}</p>
-                <p class="muted">Property tax and insurance are estimates based on state averages.</p>
+                <p class="muted">Property tax and insurance are estimates. School list is ZIP-based sample data.</p>
                 <a class="button" href="/?zip_code={zip_code}&home_price={home_price}&down_payment={down_payment}&mortgage_rate={mortgage_rate}&loan_term={loan_term}">
                     New Calc
                 </a>
