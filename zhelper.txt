@@ -36,3 +36,7 @@ alias hi-"history"
  find . -name "__pycache__" -type d -exec rm -r {} +
 
  kill -9 $(lsof -ti:8000)
+
+ kill -9 $(lsof -ti:8000) 2>/dev/null || true; python3 -m uvicorn main:app --reload
+
+ alias k='kill -9 $(lsof -ti:8000)'

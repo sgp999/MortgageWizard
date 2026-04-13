@@ -1,22 +1,28 @@
-[project]
-name = "mortagewizard"
-version = "0.1.0"
-description = "A new Python project for MortgageWizard."
-readme = "README.md"
-requires-python = ">=3.11"
-license = { text = "MIT" }
-authors = [ { name = "Your Name", email = "you@example.com" } ]
-dependencies = []
-keywords = ["mortgage", "wizard", "finance"]
-classifiers = [
-    "Programming Language :: Python :: 3",
-    "License :: OSI Approved :: MIT License",
-    "Operating System :: OS Independent",
-]
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
 
-[project.urls]
-"Source" = "https://example.com"
+# Distribution / packaging
+build/
+dist/
+*.egg-info/
 
-[build-system]
-requires = ["setuptools>=65.0", "wheel"]
-build-backend = "setuptools.build_meta"
+# Virtual environments
+.venv/
+venv/
+ENV/
+.env
+
+# IDE files
+.vscode/
+.idea/
+
+# macOS
+.DS_Store
+
+# Logs
+*.log
+
+# Uploaded files (optional for your app)
+*.pdf
