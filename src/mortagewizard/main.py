@@ -1,7 +1,11 @@
-from fastapi import FastAPI, Form, HTTPException
+from fastapi import FastAPI, Form, HTTPException, UploadFile, File
 from fastapi.responses import HTMLResponse
+from pypdf import PdfReader
+from openai import OpenAI
+import io
+import os
 
-app = FastAPI(title="MORTGAGE-WIZARD UPDATED")
+app = FastAPI(title="MORTGAGE-WIZARD")
 
 
 STATE_RATES = {
@@ -114,6 +118,88 @@ def get_schools(zip_code: str):
     return ZIP_SCHOOLS.get(zip_code, DEFAULT_SCHOOLS)
 
 
+def extract_pdf_text(file_bytes: bytes) -> str:
+    reader = PdfReader(io.BytesIO(file_bytes))
+    text = ""
+
+    for page in reader.pages:
+        page_text = page.extract_text()
+        if page_text:
+            text += page_text + "\n"
+
+    return text.strip()
+
+
+def extract_relevant_closing_lines(text: str) -> str:
+    keywords = [
+        "origination", "underwriting", "appraisal", "credit",
+        "title", "settlement", "recording", "transfer",
+        "prepaid", "escrow", "insurance", "tax",
+        "cash to close", "loan costs", "other costs",
+        "services borrower", "services you can shop",
+        "initial escrow", "total closing costs",
+        "lender fees", "title fees", "closing costs"
+    ]
+
+    lines = text.splitlines()
+    matched = []
+
+    for line in lines:
+        lower = line.lower()
+        if any(keyword in lower for keyword in keywords):
+            cleaned = line.strip()
+            if cleaned:
+                matched.append(cleaned)
+
+    return "\n".join(matched[:200])
+
+
+def get_openai_client():
+    api_key = os.getenv("OPENAI_API_KEY")
+    if not api_key:
+        return None
+    return OpenAI(api_key=api_key)
+
+
+def analyze_closing_cost_text(text: str) -> str:
+    client = get_openai_client()
+
+    if not client:
+        return "OpenAI API key not found. Add OPENAI_API_KEY to your environment to enable AI analysis."
+
+    if not text.strip():
+        return "No readable fee text was found in the uploaded PDF."
+
+    prompt = f"""
+You are an expert at reviewing real estate closing disclosures for home buyers.
+
+Read the closing disclosure fee lines below and provide:
+
+1. A short plain-English summary
+2. A breakdown of the main fee categories:
+   - Loan Costs
+   - Other Costs
+   - Prepaids
+   - Initial Escrow Payment at Closing
+   - Cash to Close
+3. Possible red flags or inflated costs
+4. Which fees are common and which may be negotiable
+5. A short list of questions the buyer should ask the lender, broker, or title company
+
+Keep the output easy to read with headings and bullet points.
+
+Closing disclosure fee lines:
+{text[:12000]}
+"""
+
+    response = client.responses.create(
+        model="gpt-4.1-mini",
+        input=prompt,
+    )
+
+    return response.output_text
+
+
 @app.get("/", response_class=HTMLResponse)
 def home(
     zip_code: str = "",
@@ -135,81 +221,84 @@ def home(
             <style>
                 body {{
                     font-family: Arial, sans-serif;
-                    max-width: 1200px;
-                    margin: 40px auto;
-                    padding: 20px;
-                    background: #f4f7fb;
+                    background: #eef3f8;
+                    margin: 0;
+                    padding: 32px;
                     color: #1f2937;
                 }}
-                .page-grid {{
-                    display: flex;
+                .page {{
+                    max-width: 1280px;
+                    margin: 0 auto;
+                }}
+                .grid {{
+                    display: grid;
+                    grid-template-columns: 2fr 1fr;
                     gap: 24px;
-                    align-items: flex-start;
                 }}
                 .card {{
                     background: white;
-                    border-radius: 14px;
-                    box-shadow: 0 2px 10px rgba(0,0,0,0.08);
-                    padding: 32px;
-                }}
-                .form-card {{
-                    flex: 1.5;
-                }}
-                .schools-card {{
-                    flex: 1;
-                    min-height: 300px;
+                    border-radius: 18px;
+                    box-shadow: 0 8px 24px rgba(15, 23, 42, 0.08);
+                    padding: 28px;
                 }}
                 h1 {{
-                    margin-top: 0;
-                    color: #1d4ed8;
-                    margin-bottom: 10px;
+                    margin: 0 0 10px 0;
+                    font-size: 52px;
+                    color: #2450d3;
+                    letter-spacing: -1px;
                 }}
-                h2 {{
+                h2, h3 {{
+                    color: #2450d3;
                     margin-top: 0;
-                    color: #1d4ed8;
+                }}
+                .subtitle {{
+                    color: #6b7280;
+                    margin-bottom: 24px;
                 }}
                 label {{
-                    font-weight: 600;
                     display: block;
+                    font-weight: 700;
                     margin-bottom: 8px;
+                    font-size: 18px;
                 }}
                 input, select {{
                     width: 100%;
-                    padding: 12px 14px;
+                    padding: 14px 16px;
                     border: 1px solid #d1d5db;
-                    border-radius: 10px;
+                    border-radius: 12px;
                     box-sizing: border-box;
-                    margin-bottom: 22px;
-                    font-size: 15px;
+                    margin-bottom: 18px;
+                    font-size: 16px;
+                    background: #fff;
+                }}
+                input:focus, select:focus {{
+                    outline: none;
+                    border-color: #2450d3;
+                    box-shadow: 0 0 0 3px rgba(36, 80, 211, 0.12);
                 }}
                 .row {{
-                    display: flex;
-                    gap: 24px;
-                    margin-bottom: 6px;
-                }}
-                .col {{
-                    flex: 1;
+                    display: grid;
+                    grid-template-columns: 1fr 1fr;
+                    gap: 18px;
                 }}
                 button {{
                     background: #2563eb;
                     color: white;
                     border: none;
-                    padding: 14px 22px;
-                    border-radius: 10px;
+                    padding: 14px 18px;
+                    border-radius: 12px;
                     font-size: 16px;
+                    font-weight: 700;
                     cursor: pointer;
-                    margin-top: 8px;
                 }}
                 button:hover {{
                     background: #1d4ed8;
                 }}
-                .small {{
+                .placeholder {{
                     color: #6b7280;
-                    font-size: 14px;
-                    margin-bottom: 26px;
                 }}
                 .school-item {{
-                    padding: 12px 0;
+                    padding: 14px 0;
                     border-bottom: 1px solid #e5e7eb;
                 }}
                 .school-item:last-child {{
@@ -220,119 +309,138 @@ def home(
                     margin-bottom: 4px;
                 }}
                 .school-rating {{
-                    color: #374151;
+                    color: #4b5563;
                 }}
-                .placeholder {{
+                .sidebar-section {{
+                    margin-top: 28px;
+                    padding-top: 24px;
+                    border-top: 1px solid #e5e7eb;
+                }}
+                .upload-note {{
                     color: #6b7280;
-                    line-height: 1.5;
+                    margin-bottom: 16px;
                 }}
                 @media (max-width: 900px) {{
-                    .page-grid {{
-                        flex-direction: column;
+                    .grid, .row {{
+                        grid-template-columns: 1fr;
                     }}
-                    .row {{
-                        flex-direction: column;
-                        gap: 0;
+                    h1 {{
+                        font-size: 40px;
                     }}
                 }}
             </style>
         </head>
         <body>
-            <div class="page-grid">
-                <div class="card form-card">
-                    <h1>MORTGAGE-WIZARD</h1>
-                    <p class="small">Enter your ZIP code and compare estimated mortgage costs, affordability, and area schools.</p>
+            <div class="page">
+                <div class="grid">
+                    <div class="card">
+                        <h1>MORTGAGE-WIZARD</h1>
+                        <div class="subtitle">Compare payments, check affordability, and review local schools.</div>
 
-                    <form action="/calculate" method="post">
-                        <div class="row">
-                            <div class="col">
-                                <label>ZIP Code</label>
-                                <input id="zip_code" name="zip_code" value="{zip_code}" required oninput="fetchRateAndSchools()">
+                        <form action="/calculate" method="post">
+                            <div class="row">
+                                <div>
+                                    <label>ZIP Code</label>
+                                    <input id="zip_code" name="zip_code" value="{zip_code}" oninput="fetchRateAndSchools()" required>
+                                </div>
+                                <div>
+                                    <label>Loan Term</label>
+                                    <select id="loan_term" name="loan_term" onchange="fetchRateAndSchools()">
+                                        <option value="30" {"selected" if loan_term == 30 else ""}>30 Year</option>
+                                        <option value="15" {"selected" if loan_term == 15 else ""}>15 Year</option>
+                                    </select>
+                                </div>
                             </div>
-                            <div class="col">
-                                <label>Loan Term</label>
-                                <select id="loan_term" name="loan_term" onchange="fetchRateAndSchools()">
-                                    <option value="30" {"selected" if loan_term == 30 else ""}>30 Year</option>
-                                    <option value="15" {"selected" if loan_term == 15 else ""}>15 Year</option>
-                                </select>
+
+                            <div class="row">
+                                <div>
+                                    <label>Home Price</label>
+                                    <input name="home_price" type="number" step="0.01" value="{home_price_value}" required>
+                                </div>
+                                <div>
+                                    <label>Down Payment</label>
+                                    <input name="down_payment" type="number" step="0.01" value="{down_payment_value}" required>
+                                </div>
                             </div>
+
+                            <div class="row">
+                                <div>
+                                    <label>Monthly Budget</label>
+                                    <input name="monthly_budget" type="number" step="0.01" value="{monthly_budget_value}">
+                                </div>
+                                <div>
+                                    <label>Mortgage Rate (%)</label>
+                                    <input id="mortgage_rate" name="mortgage_rate" type="number" step="0.01" value="{mortgage_rate_value}" required>
+                                </div>
+                            </div>
+
+                            <button type="submit">Calculate</button>
+                        </form>
+                    </div>
+
+                    <div class="card">
+                        <h2>Area Schools</h2>
+                        <div id="schools_list" class="placeholder">Enter a 5-digit ZIP code to see area schools.</div>
+
+                        <div class="sidebar-section">
+                            <h3>Closing Cost Tool</h3>
+                            <div class="upload-note">Upload a closing disclosure PDF for a faster fee review.</div>
+
+                            <form action="/closing-costs" method="post" enctype="multipart/form-data">
+                                <input type="file" name="closing_file" accept=".pdf" required>
+                                <button type="submit">Analyze</button>
+                            </form>
                         </div>
-
-                        <div class="row">
-                            <div class="col">
-                                <label>Home Price</label>
-                                <input name="home_price" type="number" step="0.01" value="{home_price_value}" required>
-                            </div>
-                            <div class="col">
-                                <label>Down Payment</label>
-                                <input name="down_payment" type="number" step="0.01" value="{down_payment_value}" required>
-                            </div>
-                        </div>
-
-                        <div class="row">
-                            <div class="col">
-                                <label>Monthly Budget ($)</label>
-                                <input name="monthly_budget" type="number" step="0.01" value="{monthly_budget_value}">
-                            </div>
-                            <div class="col">
-                                <label>Mortgage Rate (%)</label>
-                                <input id="mortgage_rate" name="mortgage_rate" type="number" step="0.01" value="{mortgage_rate_value}" required>
-                            </div>
-                        </div>
-
-                        <button type="submit">Calculate</button>
-                    </form>
-                </div>
-
-                <div class="card schools-card">
-                    <h2>Area Schools</h2>
-                    <div id="schools_list" class="placeholder">
-                        Enter a 5-digit ZIP code to see area schools.
                     </div>
                 </div>
             </div>
 
             <script>
             async function fetchRateAndSchools() {{
-                const zip = document.getElementById("zip_code").value;
-                const term = document.getElementById("loan_term").value;
+                const zip = document.getElementById("zip_code").value.trim();
+                const loanTerm = document.getElementById("loan_term").value;
+                const rateInput = document.getElementById("mortgage_rate");
                 const schoolsList = document.getElementById("schools_list");
 
                 if (zip.length !== 5) {{
-                    schoolsList.innerHTML = "Enter a 5-digit ZIP code to see area schools.";
+                    if (schoolsList) {{
+                        schoolsList.innerHTML = "<p class='placeholder'>Enter a 5-digit ZIP code to see area schools.</p>";
+                    }}
                     return;
                 }}
 
                 try {{
-                    const rateRes = await fetch(`/rate?zip_code=${{zip}}&loan_term=${{term}}`);
+                    const rateRes = await fetch(`/rate?zip_code=${{zip}}&loan_term=${{loanTerm}}`);
                     const rateData = await rateRes.json();
 
-                    if (rateData.rate) {{
-                        document.getElementById("mortgage_rate").value = rateData.rate;
+                    if (rateData.rate !== null && rateData.rate !== undefined) {{
+                        rateInput.value = rateData.rate;
                     }}
 
-                    const schoolsRes = await fetch(`/schools?zip_code=${{zip}}`);
-                    const schoolsData = await schoolsRes.json();
+                    if (schoolsList) {{
+                        const schoolsRes = await fetch(`/schools?zip_code=${{zip}}`);
+                        const schoolsData = await schoolsRes.json();
 
-                    if (schoolsData.schools && schoolsData.schools.length > 0) {{
-                        schoolsList.innerHTML = schoolsData.schools.map(
-                            school => `
-                                <div class="school-item">
-                                    <div class="school-name">${{school.name}}</div>
-                                    <div class="school-rating">Rating: ${{school.rating}}/10</div>
-                                </div>
-                            `
-                        ).join("");
-                    }} else {{
-                        schoolsList.innerHTML = "No schools found for that ZIP code.";
+                        if (schoolsData.schools && schoolsData.schools.length > 0) {{
+                            schoolsList.innerHTML = schoolsData.schools.map(
+                                s => `
+                                    <div class="school-item">
+                                        <div class="school-name">${{s.name}}</div>
+                                        <div class="school-rating">Rating: ${{s.rating}}/10</div>
+                                    </div>
+                                `
+                            ).join("");
+                        }} else {{
+                            schoolsList.innerHTML = "<p class='placeholder'>No schools found for that ZIP code.</p>";
+                        }}
                     }}
-                }} catch (error) {{
-                    schoolsList.innerHTML = "Could not load schools right now.";
+                }} catch (err) {{
+                    console.error(err);
                 }}
             }}
 
             window.onload = function() {{
-                const zip = document.getElementById("zip_code").value;
+                const zip = document.getElementById("zip_code").value.trim();
                 if (zip.length === 5) {{
                     fetchRateAndSchools();
                 }}
@@ -355,6 +463,75 @@ def schools(zip_code: str):
     if len(zip_code.strip()) != 5 or not zip_code.strip().isdigit():
         return {"schools": []}
     return {"schools": get_schools(zip_code.strip())}
+
+
+@app.post("/closing-costs", response_class=HTMLResponse)
+async def closing_costs(closing_file: UploadFile = File(...)):
+    file_bytes = await closing_file.read()
+    text = extract_pdf_text(file_bytes)
+    filtered_text = extract_relevant_closing_lines(text)
+    analysis = analyze_closing_cost_text(filtered_text)
+
+    return f"""
+    <html>
+        <head>
+            <title>Closing Cost Breakdown</title>
+            <style>
+                body {{
+                    font-family: Arial, sans-serif;
+                    max-width: 1000px;
+                    margin: 40px auto;
+                    padding: 20px;
+                    background: #f4f7fb;
+                    color: #1f2937;
+                }}
+                .card {{
+                    background: white;
+                    border-radius: 14px;
+                    box-shadow: 0 2px 10px rgba(0,0,0,0.08);
+                    padding: 24px;
+                    margin-bottom: 20px;
+                }}
+                h1, h2 {{
+                    margin-top: 0;
+                    color: #1d4ed8;
+                }}
+                .button {{
+                    display: inline-block;
+                    background: #2563eb;
+                    color: white;
+                    text-decoration: none;
+                    padding: 12px 18px;
+                    border-radius: 8px;
+                    margin-top: 16px;
+                }}
+                .button:hover {{
+                    background: #1d4ed8;
+                }}
+                .analysis-box {{
+                    white-space: pre-wrap;
+                    line-height: 1.6;
+                    background: #f9fafb;
+                    padding: 16px;
+                    border-radius: 10px;
+                    border: 1px solid #e5e7eb;
+                }}
+            </style>
+        </head>
+        <body>
+            <div class="card">
+                <h1>Closing Cost Breakdown</h1>
+                <p><b>File:</b> {closing_file.filename}</p>
+            </div>
+
+            <div class="card">
+                <h2>AI Analysis</h2>
+                <div class="analysis-box">{analysis}</div>
+                <a class="button" href="/">Back to Mortgage Wizard</a>
+            </div>
+        </body>
+    </html>
+    """
 
 
 @app.post("/calculate", response_class=HTMLResponse)
@@ -407,6 +584,8 @@ async def calculate(
     interest_saved = interest_30 - interest_15
 
     affordable_price = None
+    base_budget = None
+
     if monthly_budget and monthly_budget > 0:
         base_budget = monthly_budget - (monthly_tax + monthly_insurance + pmi)
         if base_budget > 0:
@@ -443,7 +622,7 @@ async def calculate(
     )
 
     budget_html = ""
-    if monthly_budget and monthly_budget > 0 and difference is not None:
+    if monthly_budget and monthly_budget > 0 and difference is not None and base_budget is not None:
         budget_html = f"""
         <div class="summary-card">
             <h2>Budget vs Payment</h2>
